@@ -127,6 +127,9 @@ object EudiWallet {
                     useEncryption = config.encryptDocumentsInStorage
                     checkPublicKeyBeforeAdding = config.verifyMsoPublicKey
                     secureElementPidLib = this@EudiWallet.secureElementPidLib
+                    secureArea = this@EudiWallet.secureElementPidLib?.let {
+                        SecureElementSecureArea(it)
+                    }
                 }
                 .build() as DocumentManagerImpl
 
@@ -252,6 +255,8 @@ object EudiWallet {
         docItems: List<DocItem>? = null,
         formats: Set<CredentialFormat> = setOf(
             CredentialFormat.SE_TLV_VC,
+            CredentialFormat.SD_JWT_VC,
+            CredentialFormat.MSO_MDOC,
         ),
         executor: Executor? = null,
         onEvent: OpenId4VciManager.OnIssueEvent,
@@ -272,6 +277,8 @@ object EudiWallet {
         docItems: List<DocItem>? = null,
         formats: Set<CredentialFormat> = setOf(
             CredentialFormat.SE_TLV_VC,
+            CredentialFormat.SD_JWT_VC,
+            CredentialFormat.MSO_MDOC,
         ),
         executor: Executor? = null,
         onEvent: OpenId4VciManager.OnIssueEvent,
@@ -688,6 +695,7 @@ object EudiWallet {
                     }
                     formatDocumentsResolver = transferManagerDocumentsResolver
                     documentManager = this@EudiWallet.documentManager
+                    secureArea = secureElementPidLib?.let { SecureElementSecureArea(it) }
                 }.build()
         }
     }

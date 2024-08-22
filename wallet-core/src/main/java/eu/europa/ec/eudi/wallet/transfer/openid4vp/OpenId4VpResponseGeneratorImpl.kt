@@ -114,7 +114,7 @@ private const val TAG = "OpenId4VpCBORResponseGe"
 class OpenId4VpResponseGeneratorImpl(
     private val documentsResolver: FormatDocumentsResolver,
     private val storageEngine: StorageEngine,
-    private val secureArea: AndroidKeystoreSecureArea,
+    private val secureArea: SecureArea,
     private val documentManagerImpl: DocumentManager,
     private var readerTrustStore: ReaderTrustStore? = null,
 ) : ResponseGenerator<OpenId4VpRequest>() {
@@ -344,7 +344,7 @@ class OpenId4VpResponseGeneratorImpl(
                             val addResult = if (responseDocument.isProxy) {
                                 val adhocDocument = issueAProxyDocument(
                                     unprocessedResponseDocument = responseDocument,
-                                    format =CredentialFormat.MSO_MDOC,
+                                    format = CredentialFormat.MSO_MDOC,
                                     keyForIssuingAuthChannel = requestDetails.authKeyForAuthChannel
                                 )
                                 addDocumentToResponse(
@@ -730,6 +730,7 @@ class OpenId4VpResponseGeneratorImpl(
         var formatDocumentsResolver: FormatDocumentsResolver? = null
         var documentManager: DocumentManager? = null
         var readerTrustStore: ReaderTrustStore? = null
+        var secureArea: SecureArea? = null
 
         /**
          * Reader trust store that will be used to validate the certificate chain of the mdoc verifier
@@ -744,7 +745,7 @@ class OpenId4VpResponseGeneratorImpl(
                 OpenId4VpResponseGeneratorImpl(
                     documentsResolver,
                     storageEngine,
-                    androidSecureArea,
+                    secureArea = secureArea ?: androidSecureArea,
                     documentManager!!,
                 ).apply {
                     readerTrustStore?.let { setReaderTrustStore(it) }
