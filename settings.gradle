@@ -1,0 +1,55 @@
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
+    repositories {
+        mavenLocal()
+        google()
+        mavenCentral()
+        maven {
+            url = uri("https://s01.oss.sonatype.org/content/repositories/snapshots/")
+            mavenContent { snapshotsOnly() }
+        }
+    }
+}
+
+if (file('../eudi-lib-jvm-openid4vci-kt').exists()) {
+    includeBuild('../eudi-lib-jvm-openid4vci-kt') {
+        dependencySubstitution {
+            substitute module('eu.europa.ec.eudi:eudi-lib-jvm-openid4vci-kt') using project(':')
+        }
+    }
+}
+
+
+if (file('../eudi-lib-android-wallet-document-manager').exists()) {
+    includeBuild('../eudi-lib-android-wallet-document-manager') {
+        dependencySubstitution {
+            substitute module('eu.europa.ec.eudi:eudi-lib-android-wallet-document-manager') using project(':document-manager')
+        }
+    }
+}
+
+if (file('../eudi-lib-jvm-siop-openid4vp-kt').exists()) {
+    includeBuild('../eudi-lib-jvm-siop-openid4vp-kt') {
+        dependencySubstitution {
+            substitute module('eu.europa.ec.eudi:eudi-lib-jvm-siop-openid4vp-kt') using project(':')
+        }
+    }
+}
+
+if (file("../eewa-pid-lib").exists()) {
+    includeBuild("../eewa-pid-lib") {
+        dependencySubstitution {
+            substitute(module("de.authada.eewa:eewa-pid-lib")).using(project(":eewa-pid"))
+        }
+    }
+}
+
+rootProject.name = "eudi-lib-android-wallet-core"
+include ':wallet-core'
