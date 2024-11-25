@@ -1,32 +1,32 @@
 /*
- *  Copyright (c) 2023-2024 European Commission
+ * Copyright (c) 2023-2024 European Commission
  *
- *  Licensed under the Apache License, Version 2.0 (the "License");
- *  you may not use this file except in compliance with the License.
- *  You may obtain a copy of the License at
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS,
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  *
- *  Modified by AUTHADA GmbH
- *  Copyright (c) 2024 AUTHADA GmbH
+ * Modified by AUTHADA GmbH
+ * Copyright (c) 2024 AUTHADA GmbH
  *
- *  Licensed under the Apache License, Version 2.0 (the "License");
- *  you may not use this file except in compliance with the License.
- *  You may obtain a copy of the License at
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS,
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 @file:JvmMultifileClass
 
@@ -35,11 +35,11 @@ package eu.europa.ec.eudi.wallet
 import android.content.Context
 import androidx.annotation.IntDef
 import androidx.annotation.RawRes
-import eu.europa.ec.eudi.openid4vci.ClientAttestationProvider
 import eu.europa.ec.eudi.wallet.EudiWalletConfig.Builder
 import eu.europa.ec.eudi.wallet.EudiWalletConfig.Companion.BLE_CLIENT_CENTRAL_MODE
 import eu.europa.ec.eudi.wallet.EudiWalletConfig.Companion.BLE_SERVER_PERIPHERAL_MODE
 import eu.europa.ec.eudi.wallet.internal.getCertificate
+import eu.europa.ec.eudi.wallet.logging.Logger
 import eu.europa.ec.eudi.wallet.transfer.openid4vp.OpenId4VpConfig
 import java.io.File
 import java.security.cert.X509Certificate
@@ -171,6 +171,19 @@ class EudiWalletConfig private constructor(builder: Builder) {
      */
     val openId4VciConfig: OpenId4VciConfig? = builder.openId4VciConfig
 
+
+    /**
+     * Debug logging level
+     */
+    val logLevel: Int = builder.logLevel
+
+    /**
+     * The logger. If no [Logger] instance is provided and [logLevel] is not [Logger.OFF], then the default will be used
+     */
+    val logger: Logger? = builder.logger ?: Logger(this).takeUnless { builder.logLevel == Logger.OFF }
+
+    val issuerWebsiteForBrowser: String? = builder.issuerWebsiteForBrowser
+
     /**
      * Builder
      *
@@ -206,6 +219,9 @@ class EudiWalletConfig private constructor(builder: Builder) {
         var openId4VpConfig: OpenId4VpConfig? = null
         var openId4VciConfig: OpenId4VciConfig? = null
         var walletProviderUrl: String? = null
+        var logger: Logger? = null
+        var logLevel: Int = Logger.LEVEL_ERROR
+        var issuerWebsiteForBrowser: String? = null
 
         /**
          * Documents storage dir. This is the directory where the documents will be stored.
@@ -366,6 +382,29 @@ class EudiWalletConfig private constructor(builder: Builder) {
          */
         fun openId4VciConfig(block: OpenId4VciConfig.Builder.() -> Unit) = apply {
             this.openId4VciConfig = OpenId4VciConfig.Builder().apply(block).build()
+        }
+
+        /**
+         * Set a logger
+         * @param logger The logger
+         * @return [EudiWalletConfig.Builder]
+         */
+        fun logger(logger: Logger) = apply {
+            this.logger = logger
+        }
+
+        /**
+         * Set the debug logging level.
+         * The default value is [LogLevel.OFF].
+         * @param level
+         * @return [EudiWalletConfig.Builder]
+         */
+        fun logLevel(@Logger.Level level: Int) = apply {
+            this.logLevel = level
+        }
+
+        fun issuerWebsiteForBrowser(url: String) = apply {
+            this.issuerWebsiteForBrowser = url
         }
 
         /**

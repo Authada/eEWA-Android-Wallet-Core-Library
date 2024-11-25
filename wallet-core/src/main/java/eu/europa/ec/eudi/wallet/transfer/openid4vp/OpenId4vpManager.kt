@@ -36,7 +36,6 @@ import android.util.Log
 import com.nimbusds.jose.EncryptionMethod
 import com.nimbusds.jose.JWEAlgorithm
 import com.nimbusds.jose.JWSAlgorithm
-import com.nimbusds.jose.util.Base64URL
 import eu.europa.ec.eudi.iso18013.transfer.TransferEvent
 import eu.europa.ec.eudi.iso18013.transfer.response.SessionTranscriptBytes
 import eu.europa.ec.eudi.openid4vp.Consensus
@@ -50,13 +49,11 @@ import eu.europa.ec.eudi.openid4vp.ResponseMode
 import eu.europa.ec.eudi.openid4vp.SiopOpenId4VPConfig
 import eu.europa.ec.eudi.openid4vp.SiopOpenId4Vp
 import eu.europa.ec.eudi.openid4vp.SupportedClientIdScheme
-import eu.europa.ec.eudi.openid4vp.VpToken
 import eu.europa.ec.eudi.openid4vp.asException
 import eu.europa.ec.eudi.prex.DescriptorMap
 import eu.europa.ec.eudi.prex.Id
 import eu.europa.ec.eudi.prex.JsonPath
 import eu.europa.ec.eudi.prex.PresentationSubmission
-import eu.europa.ec.eudi.wallet.document.Format
 import eu.europa.ec.eudi.wallet.internal.Openid4VpUtils
 import eu.europa.ec.eudi.wallet.internal.mainExecutor
 import kotlinx.coroutines.CoroutineScope
@@ -67,7 +64,6 @@ import org.bouncycastle.util.encoders.Hex
 import java.net.URI
 import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
-import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.Executor
 
@@ -358,6 +354,14 @@ class OpenId4vpManager(
 
                     is ClientIdScheme.X509SanUri ->
                         SupportedClientIdScheme.X509SanUri(responseGenerator.getOpenid4VpX509CertificateTrust())
+
+
+                    is ClientIdScheme.VerifierAttestation ->
+                        SupportedClientIdScheme.VerifierAttestation(
+                            VerifierAttestationSignatureVerifier(
+                                responseGenerator.getVerifierAttestationTrust()
+                            )
+                        )
                 }
             }
         )

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023 European Commission
+ * Copyright (c) 2024 European Commission
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,36 +29,39 @@
  * limitations under the License.
  */
 
-package eu.europa.ec.eudi.wallet.documentsTest.util
+package eu.europa.ec.eudi.wallet.logging
 
-import eu.europa.ec.eudi.wallet.R
-import eu.europa.ec.eudi.wallet.document.Constants as DocConstants
+import androidx.annotation.IntDef
+import eu.europa.ec.eudi.wallet.EudiWalletConfig
+import java.time.Instant
 
-/**
- * Document Type, e.g. MDL, PID, MICOV, MVR
- *
- * @property docTypeName the document type name, e.g. eu.europa.ec.eudi.pid.1
- * @property userFriendlyName a user friendly name for the document
- * @constructor Create empty Doc type
- */
-enum class DocType(val docTypeName: String, val userFriendlyName: Int) {
 
-    /**
-     * PID Doc Type
-     *
-     * @constructor Create empty Pid
-     */
-    PID(DocConstants.EU_PID_DOCTYPE, R.string.eu_pid_doctype_name),
+fun interface Logger {
 
-    /**
-     * MDL Doc Type
-     *
-     * @constructor Create empty Mdl
-     */
-    MDL(DocConstants.MDL_DOCTYPE, R.string.mdl_doctype_name);
+    data class Record(
+        @Level val level: Int,
+        val instant: Instant = Instant.now(),
+        val message: String,
+        val thrown: Throwable? = null,
+        val sourceClassName: String? = null,
+        val sourceMethod: String? = null,
+    )
+
+    fun log(record: Record)
 
     companion object {
-        infix fun from(name: String): DocType? =
-            DocType.values().firstOrNull { it.docTypeName == name }
+        const val OFF = 0
+        const val LEVEL_ERROR = 1
+        const val LEVEL_DEBUG = 3
+        operator fun invoke(config: EudiWalletConfig): Logger = LoggerImpl(config)
     }
+
+    /**
+     * Log level for the OpenId4Vci issuer
+     */
+    @Retention(AnnotationRetention.SOURCE)
+    @IntDef(value = [OFF, LEVEL_ERROR, LEVEL_DEBUG])
+    annotation class Level
 }
+
+

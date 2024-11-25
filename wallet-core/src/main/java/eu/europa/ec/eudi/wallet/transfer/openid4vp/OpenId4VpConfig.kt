@@ -94,31 +94,17 @@ class OpenId4VpConfig private constructor(private val builder: Builder) {
         lateinit var clientIdSchemes: List<ClientIdScheme>
             private set
 
-        /**
-         * Sets the issuer url.
-         *
-         * @param issuerUrl the issuer url
-         */
         fun withClientIdSchemes(clientIdSchemes: List<ClientIdScheme>) = apply { this.clientIdSchemes = clientIdSchemes }
 
         lateinit var encryptionAlgorithms: List<EncryptionAlgorithm>
             private set
 
-        /**
-         * Sets the issuer url.
-         *
-         * @param issuerUrl the issuer url
-         */
+
         fun withEncryptionAlgorithms(encryptionAlgorithms: List<EncryptionAlgorithm>) = apply { this.encryptionAlgorithms = encryptionAlgorithms }
 
         lateinit var encryptionMethods: List<EncryptionMethod>
             private set
 
-        /**
-         * Sets the issuer url.
-         *
-         * @param issuerUrl the issuer url
-         */
         fun withEncryptionMethods(encryptionMethods: List<EncryptionMethod>) = apply { this.encryptionMethods = encryptionMethods }
 
         var scheme: String = "mdoc-openid4vp"
@@ -155,6 +141,8 @@ sealed interface ClientIdScheme {
     object X509SanDns: ClientIdScheme
 
     object X509SanUri: ClientIdScheme
+
+    object VerifierAttestation: ClientIdScheme
 }
 
 data class PreregisteredVerifier(

@@ -1,11 +1,12 @@
 [versions]
-appcompat = "1.6.1"
+appcompat = "1.7.0"
 biometricKtx = "1.1.0"
 bouncy-castle = "1.77"
 cbor = "0.9"
 coseJava = "1.1.0"
 dependency-license-report = "2.4"
 dependencycheck = "9.0.9"
+dokka = "1.9.20"
 espresso-contrib = "3.5.1"
 espresso-core = "3.5.1"
 eudi-document-manager = "0.3.0-SNAPSHOT"
@@ -19,7 +20,7 @@ java = "17"
 json = "20210307"
 junit = "4.13.2"
 junit-android = "1.1.5"
-kotlin = "1.8.10"
+kotlin = "1.9.24"
 ktor = "2.3.5"
 mavenPublish = "0.25.3"
 mockito-android = "4.0.0"
@@ -33,6 +34,9 @@ test-runner = "1.4.0"
 upokecenter-cbor = "4.5.2"
 eudi-lib-jvm-sdjwt-kt = "0.3.1"
 eewaPidLib = "1.0"
+multiformat = "1.1.0"
+resultMonad = "1.4.0"
+didCommon = "1.14.0"
 
 [libraries]
 android-identity-credential = { module = "com.android.identity:identity-credential-android", version.ref = "identity-credential-android" }
@@ -53,6 +57,7 @@ eudi-lib-jvm-siop-openid4vp-kt = { module = "eu.europa.ec.eudi:eudi-lib-jvm-siop
 identity-credential = { module = "com.android.identity:identity-credential", version.ref = "identity-credential" }
 json = { module = "org.json:json", version.ref = "json" }
 junit = { module = "junit:junit", version.ref = "junit" }
+junit-jupiter-params = { module = "org.junit.jupiter:junit-jupiter-params", version.ref = "junit" }
 ktor-client-android = { module = "io.ktor:ktor-client-android", version.ref = "ktor" }
 mockito-android = { module = "org.mockito:mockito-android", version.ref = "mockito-android" }
 mockito-inline = { module = "org.mockito:mockito-inline", version.ref = "mockito-inline" }
@@ -66,12 +71,15 @@ test-runner = { module = "androidx.test:runner", version.ref = "test-runner" }
 upokecenter-cbor = { module = "com.upokecenter:cbor", version.ref = "upokecenter-cbor" }
 eewa-pid-lib = { group = "de.authada.eewa", name = "eewa-pid-lib", version.ref = "eewaPidLib" }
 eudi-lib-jvm-sdjwt-kt = { module = "eu.europa.ec.eudi:eudi-lib-jvm-sdjwt-kt", version.ref = "eudi-lib-jvm-sdjwt-kt" }
+multiformat = { module = "org.erwinkok.multiformat:multiformat", version.ref = "multiformat" }
+result-monad = { module = "org.erwinkok.result:result-monad", version.ref = "resultMonad" }
+did-common = { module = "decentralized-identity:did-common-java", version.ref = "didCommon" }
 
 [plugins]
 android-library = { id = "com.android.library", version.ref = "gradle-plugin" }
 kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
-dokka = { id = "org.jetbrains.dokka", version.ref = "kotlin" }
+dokka = { id = "org.jetbrains.dokka", version.ref = "dokka" }
 dependency-license-report = { id = "com.github.jk1.dependency-license-report", version.ref = "dependency-license-report" }
 dependencycheck = { id = "org.owasp.dependencycheck", version.ref = "dependencycheck" }
 maven-publish = { id = "com.vanniktech.maven.publish", version.ref = "mavenPublish" }

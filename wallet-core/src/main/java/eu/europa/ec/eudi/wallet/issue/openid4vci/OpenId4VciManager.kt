@@ -1,32 +1,32 @@
 /*
- *  Copyright (c) 2024 European Commission
+ * Copyright (c) 2024 European Commission
  *
- *  Licensed under the Apache License, Version 2.0 (the "License");
- *  you may not use this file except in compliance with the License.
- *  You may obtain a copy of the License at
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS,
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  *
- *  Modified by AUTHADA GmbH
- *  Copyright (c) 2024 AUTHADA GmbH
+ * Modified by AUTHADA GmbH
+ * Copyright (c) 2024 AUTHADA GmbH
  *
- *  Licensed under the Apache License, Version 2.0 (the "License");
- *  you may not use this file except in compliance with the License.
- *  You may obtain a copy of the License at
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS,
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 package eu.europa.ec.eudi.wallet.issue.openid4vci
@@ -34,10 +34,16 @@ package eu.europa.ec.eudi.wallet.issue.openid4vci
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.util.Log
 import com.nimbusds.jose.jwk.JWK
 import eu.europa.ec.eudi.iso18013.transfer.DocItem
+import eu.europa.ec.eudi.openid4vci.ClientId
 import eu.europa.ec.eudi.wallet.document.DocumentManager
+import eu.europa.ec.eudi.wallet.issue.openid4vci.OpenId4VciManager.Config
 import java.util.concurrent.Executor
+
+
+typealias IssuerMap = Map<String, Config.Issuer>
 
 /**
  * OpenId4VciManager is the main entry point to issue documents using the OpenId4Vci protocol
@@ -49,6 +55,7 @@ interface OpenId4VciManager {
     /**
      * Issue a document using a document type
      * @param docType the document type to issue
+     * @param txCode the transaction code to use for pre-authorized issuing
      * @param supportedFormats set of supported formats for issuing
      * @param executor the executor defines the thread on which the callback will be called. If null, the callback will be called on the main thread
      * @param onIssueEvent the callback to be called when the document is issued
@@ -58,6 +65,7 @@ interface OpenId4VciManager {
      */
     fun issueDocumentByDocTypeAndSupportedFormats(
         docType: String,
+        txCode: String? = null,
         supportedFormats: Set<CredentialFormat>,
         executor: Executor? = null,
         onIssueEvent: OnIssueEvent,
@@ -69,6 +77,7 @@ interface OpenId4VciManager {
     /**
      * Issue a document using an offer
      * @param offer the offer to issue
+     * @param txCode the transaction code to use for pre-authorized issuing
      * @param executor the executor defines the thread on which the callback will be called. If null, the callback will be called on the main thread
      * @param onIssueEvent the callback to be called when the document is issued. This callback may be called multiple times, each for every document in the offer
      *
@@ -77,6 +86,7 @@ interface OpenId4VciManager {
      */
     fun issueDocumentByOffer(
         offer: Offer,
+        txCode: String? = null,
         executor: Executor? = null,
         onIssueEvent: OnIssueEvent
     )
@@ -84,6 +94,7 @@ interface OpenId4VciManager {
     /**
      * Issue a document using an offer URI
      * @param offerUri the offer URI
+     * @param txCode the transaction code to use for pre-authorized issuing
      * @param executor the executor defines the thread on which the callback will be called. If null, the callback will be called on the main thread
      * @param onIssueEvent the callback to be called when the document is issued. This callback may be called multiple times, each for every document in the offer
      * @see[IssueEvent] on how to handle the result
@@ -91,6 +102,7 @@ interface OpenId4VciManager {
      */
     fun issueDocumentByOfferUri(
         offerUri: String,
+        txCode: String? = null,
         executor: Executor? = null,
         onIssueEvent: OnIssueEvent
     )
@@ -190,46 +202,52 @@ interface OpenId4VciManager {
 
     /**
      * Configuration for the OpenId4Vci issuer
-     * @property issuerUrl the issuer url
-     * @property clientId the client id
+     * @property issuerMap map of URLs for issuer based on docType
      * @property authFlowRedirectionURI the redirection URI for the authorization flow
      * @property useStrongBoxIfSupported use StrongBox for document keys if supported
-     * @property useDPoP flag that if set will enable the use of DPoP JWT
+     * @property useDPoPIfSupported flag that if set will enable the use of DPoP JWT
      */
     data class Config(
-        val issuerUrl: String,
-        val clientId: String,
+        val clientId: ClientId,
+        private val issuerMap: IssuerMap,
         val authFlowRedirectionURI: String,
         val useStrongBoxIfSupported: Boolean,
         val useDPoPIfSupported: Boolean,
         val walletProviderUrl: String? = null
     ) {
+
+        data class Issuer(
+            val issuerUrl: String,
+        )
+
+
         /**
          * Builder to create an instance of [Config]
-         * @property issuerUrl the issuer url
-         * @property clientId the client id
+         * @property issuerMap map of DocType to Issuer URL and Client ID
          * @property authFlowRedirectionURI the redirection URI for the authorization flow
          * @property useStrongBoxIfSupported use StrongBox for document keys if supported
          * @property useDPoPIfSupported flag that if set will enable the use of DPoP JWT
          *
          */
         class Builder {
-            var issuerUrl: String? = null
-            var walletProviderUrl: String? = null
-            var clientId: String? = null
-            var authFlowRedirectionURI: String? = null
-            var useStrongBoxIfSupported: Boolean = false
-            var useDPoPIfSupported: Boolean = false
-
-            /**
-             * Set the issuer url
-             */
-            fun issuerUrl(issuerUrl: String) = apply { this.issuerUrl = issuerUrl }
+            private var clientId: ClientId? = null
+            private var issuerMap: IssuerMap? = null
+            private var walletProviderUrl: String? = null
+            private var authFlowRedirectionURI: String? = null
+            private var useStrongBoxIfSupported: Boolean = false
+            private var useDPoPIfSupported: Boolean = false
 
             /**
              * Set the client id
              */
-            fun clientId(clientId: String) = apply { this.clientId = clientId }
+            fun clientId(clientId: ClientId) =
+                apply { this.clientId = clientId }
+
+            /**
+             * Set the issuer url
+             */
+            fun issuerMap(issuerMap: IssuerMap) =
+                apply { this.issuerMap = issuerMap }
 
             /**
              * Set the redirection URI for the authorization flow
@@ -259,33 +277,30 @@ interface OpenId4VciManager {
              * @throws [IllegalStateException] if issuerUrl, clientId or authFlowRedirectionURI is not set
              */
             fun build(): Config {
-                checkNotNull(issuerUrl) { "issuerUrl is required" }
-                checkNotNull(clientId) { "clientId is required" }
-                checkNotNull(authFlowRedirectionURI) { "authFlowRedirectionURI is required" }
-
                 return Config(
-                    issuerUrl!!,
-                    clientId!!,
-                    authFlowRedirectionURI!!,
-                    useStrongBoxIfSupported,
-                    useDPoPIfSupported,
-                    walletProviderUrl
+                    clientId = requireNotNull(clientId) { "clientId is required" },
+                    issuerMap = requireNotNull(issuerMap) { "issuerMap is required" },
+                    authFlowRedirectionURI = requireNotNull(authFlowRedirectionURI) { "authFlowRedirectionURI is required" },
+                    useStrongBoxIfSupported = useStrongBoxIfSupported,
+                    useDPoPIfSupported = useDPoPIfSupported,
+                    walletProviderUrl = walletProviderUrl
                 )
             }
-
-            fun withIssuerUrl(issuerUrl: String) = issuerUrl(issuerUrl)
-
-            fun withClientId(clientId: String) = clientId(clientId)
 
             fun withAuthFlowRedirectionURI(authFlowRedirectionURI: String) =
                 authFlowRedirectionURI(authFlowRedirectionURI)
         }
+
+        fun getIssuerUrlByDocType(docType: String): String =
+            issuerMap.getValue(docType).issuerUrl
 
         companion object {
             /**
              * Create an instance of [Config]
              */
             operator fun invoke(block: Builder.() -> Unit) = Builder().apply(block).build()
+
+            private const val TAG = "OpenId4VciManager"
         }
     }
 }

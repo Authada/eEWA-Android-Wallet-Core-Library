@@ -1,59 +1,52 @@
 /*
- *  Copyright (c) 2024 European Commission
+ * Copyright (c) 2024 European Commission
  *
- *  Licensed under the Apache License, Version 2.0 (the "License");
- *  you may not use this file except in compliance with the License.
- *  You may obtain a copy of the License at
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS,
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  *
- *  Modified by AUTHADA GmbH
- *  Copyright (c) 2024 AUTHADA GmbH
+ * Modified by AUTHADA GmbH
+ * Copyright (c) 2024 AUTHADA GmbH
  *
- *  Licensed under the Apache License, Version 2.0 (the "License");
- *  you may not use this file except in compliance with the License.
- *  You may obtain a copy of the License at
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS,
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 package eu.europa.ec.eudi.wallet.issue.openid4vci
 
 import android.content.Context
 import android.content.Intent
-import android.content.Intent.ACTION_VIEW
 import android.net.Uri
 import android.util.Log
-import com.nimbusds.jose.jwk.Curve
 import com.nimbusds.jose.jwk.JWK
 import eu.europa.ec.eudi.iso18013.transfer.DocItem
 import eu.europa.ec.eudi.openid4vci.*
-import eu.europa.ec.eudi.openid4vci.internal.VerifierKA
-import eu.europa.ec.eudi.wallet.attestation.WalletAttestationProvider
-import eu.europa.ec.eudi.wallet.document.AddDocumentResult
+import eu.europa.ec.eudi.openid4vci.internal.http.NamespaceForClaimsIfMdoc
 import eu.europa.ec.eudi.wallet.document.DocumentId
 import eu.europa.ec.eudi.wallet.document.DocumentManager
 import eu.europa.ec.eudi.wallet.document.IssuanceRequest
-import eu.europa.ec.eudi.wallet.document.internal.supportsStrongBox
 import eu.europa.ec.eudi.wallet.internal.mainExecutor
 import eu.europa.ec.eudi.wallet.issue.openid4vci.IssueEvent.Companion.failure
+import eu.europa.ec.eudi.wallet.issue.store.CredentialSaver
 import kotlinx.coroutines.*
 import net.minidev.json.JSONObject
-import java.net.URI
-import java.time.Clock
-import java.util.*
 import java.util.concurrent.Executor
 
 internal class DefaultOpenId4VciManager(
@@ -62,11 +55,18 @@ internal class DefaultOpenId4VciManager(
     var config: OpenId4VciManager.Config
 ) : OpenId4VciManager {
 
-    private var suspendedAuthorization: SuspendedAuthorization? = null
+    private val issuerAuthorization: IssuerAuthorization by lazy {
+        IssuerAuthorization(context)
+    }
     private val offerUriCache = mutableMapOf<String, Offer>()
+
+    private val credentialSaver: CredentialSaver by lazy {
+        CredentialSaver(documentManager)
+    }
 
     override fun issueDocumentByDocTypeAndSupportedFormats(
         docType: String,
+        txCode: String?,
         supportedFormats: Set<CredentialFormat>,
         executor: Executor?,
         onIssueEvent: OpenId4VciManager.OnIssueEvent,
@@ -75,68 +75,90 @@ internal class DefaultOpenId4VciManager(
         storeDocument: Boolean
     ) {
         val listener = onIssueEvent.wrap(executor)
-        clearStateThen {
-            runBlocking {
-                try {
-                    val credentialIssuerId = CredentialIssuerId(config.issuerUrl).getOrThrow()
-                    val (credentialIssuerMetadata, authorizationServerMetadata) = DefaultHttpClientFactory()
-                        .use { client ->
-                            Issuer.metaData(client, credentialIssuerId)
-                        }
-                    val configurationsFilter = DocTypeFilterFactory(docType, supportedFormats)
-                    val filterList = listOf(
-                        configurationsFilter,
-                        ProofTypeFilter
-                    )
-                    val credentialConfigurationIds =
-                        credentialIssuerMetadata.credentialConfigurationsSupported.filter { (_, conf) ->
-                            filterList.all { filter -> filter(conf) }
-                        }.keys.ifEmpty { throw IllegalStateException("No suitable configuration found") }
+        runBlocking {
+            try {
+                val credentialIssuerId =
+                    CredentialIssuerId(config.getIssuerUrlByDocType(docType)).getOrThrow()
+                val (credentialIssuerMetadata, authorizationServerMetadata) = DefaultHttpClientFactory()
+                    .use { client ->
+                        Issuer.metaData(client, credentialIssuerId)
+                    }
+                val configurationsFilter = DocTypeFilterFactory(docType, supportedFormats)
+                val filterList = listOf(
+                    configurationsFilter,
+                    ProofTypeFilter
+                )
+                val credentialConfigurationIds =
+                    credentialIssuerMetadata.credentialConfigurationsSupported.filter { (_, conf) ->
+                        filterList.all { filter -> filter(conf) }
+                    }.keys.ifEmpty { throw IllegalStateException("No suitable configuration found") }
 
-                    val credentialOffer = CredentialOffer(
-                        credentialIssuerIdentifier = credentialIssuerId,
-                        credentialIssuerMetadata = credentialIssuerMetadata,
-                        authorizationServerMetadata = authorizationServerMetadata.first(),
-                        credentialConfigurationIdentifiers = credentialConfigurationIds.toList(),
-                        claims = mapClaimsToCredentialOffer(claims)
-                    )
+                val credentialOffer = CredentialOffer(
+                    credentialIssuerIdentifier = credentialIssuerId,
+                    credentialIssuerMetadata = credentialIssuerMetadata,
+                    authorizationServerMetadata = authorizationServerMetadata.first(),
+                    credentialConfigurationIdentifiers = credentialConfigurationIds.toList(),
+                    claims = mapClaimsToCredentialOffer(claims, supportedFormats)
+                )
 
-                    val offer = DefaultOffer(credentialOffer, filterList)
-                    doIssueDocumentByOffer(offer, config, listener, keyForIssuingAuthChannel, storeDocument)
+                val offer = DefaultOffer(credentialOffer, filterList)
+                doIssueDocumentByOffer(
+                    offer,
+                    txCode,
+                    config,
+                    listener,
+                    keyForIssuingAuthChannel,
+                    storeDocument
+                )
 
-                } catch (e: Throwable) {
-                    Log.e(TAG, "error during issueDocumentByDocType", e)
-                    listener(failure(e))
-                }
+            } catch (e: Throwable) {
+                Log.e(TAG, "error during issueDocumentByDocType", e)
+                listener(failure(e))
             }
         }
     }
 
 
-    private fun mapClaimsToCredentialOffer(claims: List<DocItem>?): Map<String, Any> {
-        val userSelectedClaims: Map<String, Map<String, JSONObject>>? =
-            claims?.groupBy { it.namespace }?.mapValues {
-                it.value.associate { docItem ->
-                    docItem.elementIdentifier to JSONObject()
+    private fun mapClaimsToCredentialOffer(
+        claims: List<DocItem>?,
+        supportedFormats: Set<CredentialFormat>
+    ): Map<NamespaceForClaimsIfMdoc?, Any> {
+        val claimsInMdocFormat = supportedFormats.any { it == CredentialFormat.MSO_MDOC }
+        val userSelectedClaims: Map<NamespaceForClaimsIfMdoc?, Map<String, JSONObject>>? =
+            if (claimsInMdocFormat) {
+                claims?.groupBy { it.namespace }?.mapValues {
+                    it.value.associate { docItem ->
+                        docItem.elementIdentifier to JSONObject()
+                    }
                 }
-            }?.toMap()
+            } else {
+                val claimsWithoutNamespace = (claims?.map { docItem ->
+                    docItem.elementIdentifier to JSONObject()
+                }?.toMap())
+                claimsWithoutNamespace?.let { mapOf(null to it) }
+            }
 
         return userSelectedClaims ?: emptyMap()
     }
 
     override fun issueDocumentByOffer(
         offer: Offer,
+        txCode: String?,
         executor: Executor?,
         onIssueEvent: OpenId4VciManager.OnIssueEvent
     ) {
-        clearStateThen {
-            launch(onIssueEvent.wrap(executor)) { coroutineScope, listener ->
-                try {
-                    doIssueDocumentByOffer(offer, config, listener, keyForIssuingAuthChannel = null)
-                } catch (e: Throwable) {
-                    listener(failure(e))
-                    coroutineScope.cancel("issueDocumentByOffer failed", e)
-                }
+        launch(onIssueEvent.wrap(executor)) { coroutineScope, listener ->
+            try {
+                doIssueDocumentByOffer(
+                    offer,
+                    txCode,
+                    config,
+                    listener,
+                    keyForIssuingAuthChannel = null
+                )
+            } catch (e: Throwable) {
+                listener(failure(e))
+                coroutineScope.cancel("issueDocumentByOffer failed", e)
             }
         }
     }
@@ -144,20 +166,25 @@ internal class DefaultOpenId4VciManager(
 
     override fun issueDocumentByOfferUri(
         offerUri: String,
+        txCode: String?,
         executor: Executor?,
         onIssueEvent: OpenId4VciManager.OnIssueEvent
     ) {
-        clearStateThen {
-            launch(onIssueEvent.wrap(executor)) { coroutineScope, listener ->
-                try {
-                    val offer = offerUriCache[offerUri]
-                        ?: CredentialOfferRequestResolver().resolve(offerUri).getOrThrow()
-                            .let { DefaultOffer(it) }
-                    doIssueDocumentByOffer(offer, config, listener, keyForIssuingAuthChannel = null)
-                } catch (e: Throwable) {
-                    listener(failure(e))
-                    coroutineScope.cancel("issueDocumentByOffer failed", e)
-                }
+        launch(onIssueEvent.wrap(executor)) { coroutineScope, listener ->
+            try {
+                val offer = offerUriCache[offerUri]
+                    ?: CredentialOfferRequestResolver().resolve(offerUri).getOrThrow()
+                        .let { DefaultOffer(it) }
+                doIssueDocumentByOffer(
+                    offer,
+                    txCode,
+                    config,
+                    listener,
+                    keyForIssuingAuthChannel = null
+                )
+            } catch (e: Throwable) {
+                listener(failure(e))
+                coroutineScope.cancel("issueDocumentByOffer failed", e)
             }
         }
     }
@@ -184,49 +211,52 @@ internal class DefaultOpenId4VciManager(
     }
 
     override fun resumeWithAuthorization(intent: Intent) {
-        suspendedAuthorization?.use { it.resumeFromIntent(intent) }
-            ?: throw IllegalStateException("No authorization request to resume")
+        issuerAuthorization.resumeFromIntent(intent)
     }
 
     override fun resumeWithAuthorization(uri: String) {
-        suspendedAuthorization?.use { it.resumeFromUri(uri) }
-            ?: throw IllegalStateException("No authorization request to resume")
+        resumeWithAuthorization(Uri.parse(uri))
     }
 
     override fun resumeWithAuthorization(uri: Uri) {
-        suspendedAuthorization?.use { it.resumeFromUri(uri) }
-            ?: throw IllegalStateException("No authorization request to resume")
+        issuerAuthorization.resumeFromUri(uri)
     }
 
     private suspend fun doIssueDocumentByOffer(
         offer: Offer,
+        txCode: String?,
         config: OpenId4VciManager.Config,
         onEvent: OpenId4VciManager.OnResult<IssueEvent>,
         keyForIssuingAuthChannel: JWK?,
         storeDocument: Boolean = true
     ) {
-        offer as DefaultOffer
-        val credentialOffer = offer.credentialOffer
-        val issuer = Issuer.make(config.toOpenId4VCIConfig(context, keyForIssuingAuthChannel), credentialOffer).getOrThrow()
         onEvent(IssueEvent.Started(offer.offeredDocuments.size))
+
+        val addedDocuments = mutableSetOf<DocumentId>()
+
+        val issuer = IssuerCreator().createIssuer(
+            offer = offer,
+            config = config,
+            context = context,
+            keyForIssuingAuthChannel = keyForIssuingAuthChannel,
+            issuerIdentifier = offer.issuerIdentifier
+        )
+
         with(issuer) {
-            val prepareAuthorizationCodeRequest = prepareAuthorizationRequest().getOrThrow()
-            val authResponse =
-                openBrowserForAuthorization(prepareAuthorizationCodeRequest).getOrThrow()
-            val authorizedRequest = prepareAuthorizationCodeRequest.authorizeWithAuthorizationCode(
-                AuthorizationCode(authResponse.authorizationCode),
-                authResponse.serverState
-            ).getOrThrow()
-
-            val addedDocuments = mutableSetOf<DocumentId>()
-
+            val authorizedRequest = issuerAuthorization.authorize(issuer, txCode)
             offer.offeredDocuments.forEach { item ->
                 val issuanceRequest = documentManager
-                    .createIssuanceRequest(item, config.useStrongBoxIfSupported, storeDocument)
+                    .createIssuanceRequest(
+                        offerOfferedDocument = item,
+                        hardwareBacked = config.useStrongBoxIfSupported,
+                        storeDocument = storeDocument
+                    )
                     .getOrThrow()
+
+                val confIdentifier = (item as DefaultOfferedDocument).configurationIdentifier
                 doIssueCredential(
                     authorizedRequest,
-                    item.configurationIdentifier,
+                    confIdentifier,
                     item.configuration,
                     issuanceRequest,
                     addedDocuments,
@@ -234,22 +264,6 @@ internal class DefaultOpenId4VciManager(
                 )
             }
             onEvent(IssueEvent.Finished(addedDocuments.toList()))
-        }
-    }
-
-
-    private suspend fun openBrowserForAuthorization(prepareAuthorizationCodeRequest: AuthorizationRequestPrepared): Result<SuspendedAuthorization.Response> {
-        val authorizationCodeUri =
-            Uri.parse(prepareAuthorizationCodeRequest.authorizationCodeURL.value.toString())
-
-        return suspendCancellableCoroutine { continuation ->
-            suspendedAuthorization = SuspendedAuthorization(continuation)
-            continuation.invokeOnCancellation {
-                suspendedAuthorization = null
-            }
-            context.startActivity(Intent(ACTION_VIEW, authorizationCodeUri).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            })
         }
     }
 
@@ -310,7 +324,7 @@ internal class DefaultOpenId4VciManager(
                 )
             )
 
-            is SubmittedRequest.Success -> storeIssuedCredential(
+            is SubmittedRequest.Success -> credentialSaver.storeIssuedCredential(
                 outcome.credentials[0],
                 issuanceRequest,
                 credentialConfiguration,
@@ -351,7 +365,7 @@ internal class DefaultOpenId4VciManager(
                     )
                 )
 
-                is SubmittedRequest.Success -> storeIssuedCredential(
+                is SubmittedRequest.Success -> credentialSaver.storeIssuedCredential(
                     outcome.credentials[0],
                     issuanceRequest,
                     credentialConfiguration,
@@ -364,7 +378,10 @@ internal class DefaultOpenId4VciManager(
             when (val status = proofSigner.userAuthStatus) {
                 is ProofSigner.UserAuthStatus.Required -> {
                     val event = object :
-                        IssueEvent.DocumentRequiresUserAuth(issuanceRequest, status.cryptoObject) {
+                        IssueEvent.DocumentRequiresUserAuth(
+                            issuanceRequest,
+                            status.cryptoObject
+                        ) {
                         override fun resume() {
                             runBlocking {
                                 doRequestSingleWithProof(
@@ -390,52 +407,6 @@ internal class DefaultOpenId4VciManager(
         }
     }
 
-    private fun storeIssuedCredential(
-        issuedCredential: IssuedCredential,
-        issuanceRequest: IssuanceRequest,
-        credentialConfiguration: CredentialConfiguration,
-        onEvent: OpenId4VciManager.OnResult<IssueEvent>,
-        addedDocuments: MutableSet<DocumentId>
-    ) {
-        when (issuedCredential) {
-            is IssuedCredential.Deferred -> onEvent(
-                IssueEvent.DocumentFailed(
-                    issuanceRequest,
-                    Exception("Deferred credential not implemented yet"),
-                )
-            )
-
-            is IssuedCredential.Issued -> {
-                val addResult = when (credentialConfiguration) {
-                    is MsoMdocCredential -> issuanceRequest.storeCredential(
-                        Base64.getUrlDecoder().decode(issuedCredential.credential)
-                    )
-
-                    is SdJwtVcCredential -> issuanceRequest.storeCredential(
-                        issuedCredential.credential.toByteArray(Charsets.UTF_8)
-                    )
-
-                    is SeTlvVcCredential -> issuanceRequest.storeCredential(
-                        Base64.getUrlDecoder().decode(issuedCredential.credential)
-                    )
-
-                    else -> throw CredentialIssuanceError.UnsupportedCredentialFormat
-                }
-                when (addResult) {
-                    is AddDocumentResult.Failure -> {
-                        documentManager.deleteDocumentById(issuanceRequest.documentId)
-                        onEvent(IssueEvent.DocumentFailed(issuanceRequest, addResult.throwable))
-                    }
-
-                    is AddDocumentResult.Success -> {
-                        addedDocuments += addResult.documentId
-                        onEvent(IssueEvent.DocumentIssued(issuanceRequest, addResult.documentId, issuedCredential.credential))
-                    }
-                }
-            }
-        }
-    }
-
     private fun <R : OpenId4VciManager.OnResult<V>, V> R.wrap(executor: Executor?): OpenId4VciManager.OnResult<V> {
         return OpenId4VciManager.OnResult { result: V ->
             (executor ?: context.mainExecutor()).execute {
@@ -452,40 +423,7 @@ internal class DefaultOpenId4VciManager(
         scope.launch { block(scope, onResult) }
     }
 
-    private fun clearStateThen(block: () -> Unit) {
-        suspendedAuthorization?.close()
-        suspendedAuthorization = null
-        block()
-    }
-
     companion object {
         private const val TAG = "DefaultOpenId4VciManage"
-
-        private fun OpenId4VciManager.Config.toOpenId4VCIConfig(context: Context, keyForIssuingAuthChannel: JWK?): OpenId4VCIConfig {
-            val keyGenerationConfig = KeyGenerationConfig(Curve.P_256, 2048)
-            val attestationKeyHardwareBacked =
-                this.useStrongBoxIfSupported && context.supportsStrongBox
-            return OpenId4VCIConfig(
-                clientId = clientId,
-                authFlowRedirectionURI = URI.create(authFlowRedirectionURI),
-                keyGenerationConfig = keyGenerationConfig,
-                credentialResponseEncryptionPolicy = CredentialResponseEncryptionPolicy.SUPPORTED,
-                dPoPSigner = if (useDPoPIfSupported) DPoPSigner().toPopSigner() else null,
-                clientAttestationProvider = this.walletProviderUrl?.let {
-                    WalletAttestationProvider(
-                        url = HttpsUrl(it).getOrThrow(),
-                        clock = Clock.systemUTC(),
-                        clientId = clientId,
-                        issuerId = CredentialIssuerId(issuerUrl).getOrThrow(),
-                        walletProviderId = it,
-                        keyStrongBoxBacked = attestationKeyHardwareBacked
-                    )
-                },
-                verifierKA = keyForIssuingAuthChannel?.let {
-                    VerifierKA(keyForIssuingAuthChannel)
-                }
-
-            )
-        }
     }
 }

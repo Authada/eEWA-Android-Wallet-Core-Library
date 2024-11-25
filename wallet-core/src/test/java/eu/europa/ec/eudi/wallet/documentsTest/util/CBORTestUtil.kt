@@ -61,7 +61,8 @@ object CBORTestUtil {
                 CborUtil.cborMapExtractString(
                     docDataItem,
                     "docType"
-                )
+                    //Replace eu.europa.ec.eudiw.pid.1 with our pid type
+                ).takeIf { it != "eu.europa.ec.eudiw.pid.1" } ?: "eu.europa.ec.eudi.pid.1"
 
             val issuerSignedMap =
                 CborUtil.cborMapExtractMap(

@@ -32,6 +32,11 @@
 package eu.europa.ec.eudi.wallet
 
 import android.content.Context
+import eu.europa.ec.eudi.wallet.document.Constants.EU_PID_DOCTYPE
+import eu.europa.ec.eudi.wallet.document.Constants.MDL_DOCTYPE
+import eu.europa.ec.eudi.wallet.documentsTest.util.DocType
+import eu.europa.ec.eudi.wallet.issue.openid4vci.IssuerMap
+import eu.europa.ec.eudi.wallet.issue.openid4vci.OpenId4VciManager
 import eu.europa.ec.eudi.wallet.transfer.openid4vp.ClientIdScheme
 import eu.europa.ec.eudi.wallet.transfer.openid4vp.EncryptionAlgorithm
 import eu.europa.ec.eudi.wallet.transfer.openid4vp.EncryptionMethod
@@ -84,8 +89,8 @@ class EudiWalletConfigTest {
                 withEncryptionMethods(listOf(EncryptionMethod.A128CBC_HS256))
             }
             openId4VciConfig {
-                issuerUrl("https://example.com")
-                clientId("client-id")
+                clientId(CLIENT_ID)
+                issuerMap(VALID_ISSUER_URLS_PROVIDER)
                 authFlowRedirectionURI("eudi-openid4ci://authorize")
             }
         }
@@ -108,10 +113,27 @@ class EudiWalletConfigTest {
             (config.openId4VPConfig?.clientIdSchemes?.get(0) as ClientIdScheme.Preregistered).preregisteredVerifiers[0].legalName
         )
         assertEquals(ClientIdScheme.X509SanDns, config.openId4VPConfig?.clientIdSchemes?.get(1))
-        assertEquals(EncryptionAlgorithm.ECDH_ES, config.openId4VPConfig?.encryptionAlgorithms?.get(0))
-        assertEquals(EncryptionMethod.A128CBC_HS256, config.openId4VPConfig?.encryptionMethods?.get(0))
-        assertEquals("https://example.com", config.openId4VciConfig?.issuerUrl)
-        assertEquals("client-id", config.openId4VciConfig?.clientId)
+        assertEquals(
+            EncryptionAlgorithm.ECDH_ES,
+            config.openId4VPConfig?.encryptionAlgorithms?.get(0)
+        )
+        assertEquals(
+            EncryptionMethod.A128CBC_HS256,
+            config.openId4VPConfig?.encryptionMethods?.get(0)
+        )
+        with(config.openId4VciConfig!!) {
+            assertEquals(
+                "https://issuer.example.com/mdl",
+                getIssuerUrlByDocType(DocType.MDL.docTypeName)
+            )
+            assertEquals(CLIENT_ID, clientId)
+            assertEquals(
+                "https://issuer.example.com/pid",
+                getIssuerUrlByDocType(DocType.PID.docTypeName)
+            )
+        }
+
+
         assertEquals("eudi-openid4ci://authorize", config.openId4VciConfig?.authFlowRedirectionURI)
     }
 
@@ -161,5 +183,17 @@ class EudiWalletConfigTest {
         assertNull(config.trustedReaderCertificates)
         assertNull(config.openId4VPConfig)
         assertNull(config.openId4VciConfig)
+    }
+
+    companion object {
+        private const val CLIENT_ID = "mock_client_id"
+        private val VALID_ISSUER_URLS_PROVIDER: IssuerMap = mapOf(
+            EU_PID_DOCTYPE to OpenId4VciManager.Config.Issuer(
+                "https://issuer.example.com/pid"
+            ),
+            MDL_DOCTYPE to OpenId4VciManager.Config.Issuer(
+                "https://issuer.example.com/mdl"
+            )
+        )
     }
 }

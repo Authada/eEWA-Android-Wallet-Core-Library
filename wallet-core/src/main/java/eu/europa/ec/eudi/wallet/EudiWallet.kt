@@ -1,32 +1,32 @@
 /*
- *  Copyright (c) 2023-2024 European Commission
+ * Copyright (c) 2023-2024 European Commission
  *
- *  Licensed under the Apache License, Version 2.0 (the "License");
- *  you may not use this file except in compliance with the License.
- *  You may obtain a copy of the License at
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS,
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  *
- *  Modified by AUTHADA GmbH
- *  Copyright (c) 2024 AUTHADA GmbH
+ * Modified by AUTHADA GmbH
+ * Copyright (c) 2024 AUTHADA GmbH
  *
- *  Licensed under the Apache License, Version 2.0 (the "License");
- *  you may not use this file except in compliance with the License.
- *  You may obtain a copy of the License at
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS,
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 package eu.europa.ec.eudi.wallet
@@ -52,6 +52,7 @@ import eu.europa.ec.eudi.wallet.document.sample.SampleDocumentManager
 import eu.europa.ec.eudi.wallet.internal.getCertificate
 import eu.europa.ec.eudi.wallet.internal.mainExecutor
 import eu.europa.ec.eudi.wallet.issue.openid4vci.*
+import eu.europa.ec.eudi.wallet.transfer.FormatDocRequest
 import eu.europa.ec.eudi.wallet.transfer.FormatDocumentsResolver
 import eu.europa.ec.eudi.wallet.transfer.FormatRequestDocument
 import eu.europa.ec.eudi.wallet.transfer.asMdocDocumentsResolver
@@ -127,6 +128,11 @@ object EudiWallet {
                     useEncryption = config.encryptDocumentsInStorage
                     checkPublicKeyBeforeAdding = config.verifyMsoPublicKey
                     secureElementPidLib = this@EudiWallet.secureElementPidLib
+                    secureArea = this@EudiWallet.secureElementPidLib?.let {pidLib ->
+                        {
+                            SecureElementSecureArea(pidLib, it)
+                        }
+                    }
                 }
                 .build() as DocumentManagerImpl
 
@@ -180,11 +186,20 @@ object EudiWallet {
 
     /**
      * Returns the list of documents
-     * @see [DocumentManager.getDocuments]
+     * @see [DocumentManager.getDocumentsSynchronous]
      * @return the list of documents
      * @throws IllegalStateException if [EudiWallet] is not firstly initialized via the [init] method
      */
-    fun getDocuments(): List<Document> = documentManager.getDocuments()
+    fun getDocuments(): List<Document> = documentManager.getDocumentsSynchronous()
+
+    /**
+     * Returns the list of documents
+     * @see [DocumentManager.getDocumentsSynchronous]
+     * @return the list of documents
+     * @throws IllegalStateException if [EudiWallet] is not firstly initialized via the [init] method
+     */
+    suspend fun getDocumentsWithMetaData(): List<Document> =
+        documentManager.getDocumentsWithMetaData()
 
     /**
      * Returns the document with the given [documentId]
@@ -193,7 +208,7 @@ object EudiWallet {
      * @return the document with the given [documentId] or null if not found
      * @throws IllegalStateException if [EudiWallet] is not firstly initialized via the [init] method
      */
-    fun getDocumentById(documentId: DocumentId): Document? =
+    suspend fun getDocumentById(documentId: DocumentId): Document? =
         documentManager.getDocumentById(documentId)
 
     /**
@@ -203,7 +218,7 @@ object EudiWallet {
      * @return [DeleteDocumentResult]
      * @throws IllegalStateException if [EudiWallet] is not firstly initialized via the [init] method
      */
-    fun deleteDocumentById(documentId: DocumentId): DeleteDocumentResult =
+    suspend fun deleteDocumentById(documentId: DocumentId): DeleteDocumentResult =
         documentManager.deleteDocumentById(documentId)
 
     /**
@@ -239,6 +254,7 @@ object EudiWallet {
     /**
      * Issue a document using the OpenId4VCI protocol
      * @param docType the document type to issue
+     * @param txCode the transaction code for pre-authorized issuing
      * @param executor the executor defines the thread on which the callback will be called. If null, the callback will be called on the main thread
      * @param onEvent the callback to be called when the document is issued
      * @throws IllegalStateException if [EudiWallet] is not firstly initialized via the [init] method
@@ -249,15 +265,15 @@ object EudiWallet {
      */
     fun issueDocumentByDocTypeAndFormat(
         docType: String,
+        txCode: String? = null,
         docItems: List<DocItem>? = null,
-        formats: Set<CredentialFormat> = setOf(
-            CredentialFormat.SE_TLV_VC,
-        ),
+        formats: Set<CredentialFormat> = supportedFormats,
         executor: Executor? = null,
         onEvent: OpenId4VciManager.OnIssueEvent,
     ) {
         issueDocumentByDocTypeAndFormat(
             docType,
+            txCode,
             docItems,
             formats,
             executor,
@@ -269,10 +285,9 @@ object EudiWallet {
 
     fun issueDocumentByDocTypeAndFormat(
         docType: String,
+        txCode: String? = null,
         docItems: List<DocItem>? = null,
-        formats: Set<CredentialFormat> = setOf(
-            CredentialFormat.SE_TLV_VC,
-        ),
+        formats: Set<CredentialFormat> = supportedFormats,
         executor: Executor? = null,
         onEvent: OpenId4VciManager.OnIssueEvent,
         keyForIssuingAuthChannelThisMethod: JWK? = null,
@@ -280,6 +295,7 @@ object EudiWallet {
     ) {
         openId4VciManager?.issueDocumentByDocTypeAndSupportedFormats(
             docType,
+            txCode,
             formats,
             executor,
             onEvent,
@@ -296,7 +312,9 @@ object EudiWallet {
     /**
      * Issue a document using an offer and the OpenId4VCI protocol
      * @param offer the offer to issue
-     * @param executor the executor defines the thread on which the callback will be called. If null, the callback will be called on the main thread
+     * @param txCode the transaction code for pre-authorized issuing
+     * @param executor the executor defines the thread on which the callback will be called. If null, the callback will
+     * be called on the main thread
      * @param onEvent the callback to be called when the document is issued
      * @throws IllegalStateException if [EudiWallet] is not firstly initialized via the [init] method
      * @throws IllegalStateException if [EudiWalletConfig.openId4VciConfig] is not set
@@ -306,10 +324,11 @@ object EudiWallet {
      */
     fun issueDocumentByOffer(
         offer: Offer,
+        txCode: String? = null,
         executor: Executor? = null,
         onEvent: OpenId4VciManager.OnIssueEvent
     ) {
-        openId4VciManager?.issueDocumentByOffer(offer, executor, onEvent)
+        openId4VciManager?.issueDocumentByOffer(offer, txCode, executor, onEvent)
             ?: run {
                 (executor ?: context.mainExecutor()).execute {
                     onEvent(IssueEvent.failure(IllegalStateException("OpenId4Vci config is not set in configuration")))
@@ -320,6 +339,7 @@ object EudiWallet {
     /**
      * Issue a document using an offerUri and the OpenId4VCI protocol
      * @param offerUri the offer uri
+     * @param txCode the transaction code for pre-authorized issuing
      * @param executor the executor defines the thread on which the callback will be called. If null, the callback will be called on the main thread
      * @param onEvent the callback to be called when the document is issued
      * @throws IllegalStateException if [EudiWallet] is not firstly initialized via the [init] method
@@ -330,10 +350,11 @@ object EudiWallet {
      */
     fun issueDocumentByOfferUri(
         offerUri: String,
+        txCode: String? = null,
         executor: Executor? = null,
         onEvent: OpenId4VciManager.OnIssueEvent
     ) {
-        openId4VciManager?.issueDocumentByOfferUri(offerUri, executor, onEvent) ?: run {
+        openId4VciManager?.issueDocumentByOfferUri(offerUri, txCode, executor, onEvent) ?: run {
             (executor ?: context.mainExecutor()).execute {
                 onEvent(IssueEvent.failure(IllegalStateException("OpenId4Vci config is not set in configuration")))
             }
@@ -654,9 +675,7 @@ object EudiWallet {
 
     private val transferManagerDocumentsResolver: FormatDocumentsResolver
         get() = FormatDocumentsResolver { req ->
-            documentManager.getDocuments().filter { doc ->
-                doc.docType == req.docType && doc.format == req.format
-            }.map { doc ->
+            documentManager.getDocumentsSynchronous().filterDocumentsBasedOnRequest(req).map { doc ->
                 FormatRequestDocument(
                     documentId = doc.id,
                     docType = doc.docType,
@@ -666,6 +685,25 @@ object EudiWallet {
                 )
             }
         }
+
+    private fun List<Document>.filterDocumentsBasedOnRequest(docRequest: FormatDocRequest): List<Document> {
+        return this
+            .filter { doc -> doc.format == docRequest.format }
+            .filter { doc ->
+                when (docRequest.format) {
+                    Format.MSO_MDOC -> doc.docType == docRequest.docType
+                    Format.SD_JWT_VC, Format.SE_TLV -> {
+                        val allowedDocType = docRequest.requestItems.find {
+                            it.elementIdentifier.equals(
+                                "vct",
+                                ignoreCase = true
+                            )
+                        }?.namespace ?: docRequest.docType
+                        doc.docType == allowedDocType
+                    }
+                }
+            }
+    }
 
     private val deviceResponseGenerator: ResponseGenerator<DeviceRequest> by lazy {
         requireInit {
@@ -688,6 +726,11 @@ object EudiWallet {
                     }
                     formatDocumentsResolver = transferManagerDocumentsResolver
                     documentManager = this@EudiWallet.documentManager
+                    secureArea = secureElementPidLib?.let { pidLib ->
+                        {
+                            SecureElementSecureArea(pidLib, it)
+                        }
+                    }
                 }.build()
         }
     }
@@ -697,4 +740,10 @@ object EudiWallet {
         REST_API,
         ISO_18013_5
     }
+
+    private val supportedFormats = setOf(
+        CredentialFormat.SE_TLV_VC,
+        CredentialFormat.MSO_MDOC,
+        CredentialFormat.SD_JWT_VC
+    )
 }

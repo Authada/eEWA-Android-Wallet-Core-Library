@@ -137,13 +137,13 @@ class WalletAttestationProvider(
 
 
         val pidLib = EudiWallet.secureElementPidLib
-        val walletAttestation = pidLib?.walletAttestation(byteArrayOf(0))
+        val walletAttestation = pidLib?.walletAttestation(cNonceFromWalletBackend.value.toByteArray())
         val signer = walletAttestation?.let {
             val seJwk = JWK.parseFromPEMEncodedObjects(walletAttestation.devicePublicKey.pem)
             PopSigner.Jwt(
                 JWSAlgorithm.ES256,
                 JwtBindingKey.Jwk(seJwk),
-                SESigner(pidLib)
+                SESigner(pidLib, walletAttestation.devicePublicKeyKeyId)
             )
         } ?: PopSigner.Jwt(
             JWSAlgorithm.ES256,
@@ -164,6 +164,11 @@ class WalletAttestationProvider(
         )
         val attestationPop =
             createAttestationPop(signer, issuerId.value.value.toExternalForm(), nonce)
+
+        walletAttestation?.let {
+            pidLib.deleteKeyId(walletAttestation.devicePublicKeyKeyId)
+        }
+
         return ClientAttestationType(
             "${attestation.serialize()}~${attestationPop.serialize()}"
         )

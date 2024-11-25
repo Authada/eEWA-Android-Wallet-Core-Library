@@ -35,23 +35,23 @@ import com.nimbusds.jose.JWSAlgorithm
 import com.nimbusds.jose.crypto.impl.ECDSA
 import eu.europa.ec.eudi.openid4vci.CredentialConfiguration
 import eu.europa.ec.eudi.openid4vci.CredentialIssuanceError
+import eu.europa.ec.eudi.openid4vci.Display
 import eu.europa.ec.eudi.openid4vci.MsoMdocCredential
 import eu.europa.ec.eudi.openid4vci.ProofTypeMeta
 import eu.europa.ec.eudi.openid4vci.SdJwtVcCredential
 import eu.europa.ec.eudi.openid4vci.SeTlvVcCredential
-import eu.europa.ec.eudi.openid4vci.W3CJsonLdDataIntegrityCredential
-import eu.europa.ec.eudi.openid4vci.W3CJsonLdSignedJwtCredential
-import eu.europa.ec.eudi.openid4vci.W3CSignedJwtCredential
 import eu.europa.ec.eudi.openid4vci.type
 import eu.europa.ec.eudi.wallet.document.CreateIssuanceRequestResult
+import eu.europa.ec.eudi.wallet.document.DocumentId
 import eu.europa.ec.eudi.wallet.document.DocumentManager
 import eu.europa.ec.eudi.wallet.document.Format
 import eu.europa.ec.eudi.wallet.document.IssuanceRequest
+import eu.europa.ec.eudi.wallet.document.room.DocumentMetaData
+import eu.europa.ec.eudi.wallet.document.room.DocumentMetaData.Image
 import org.bouncycastle.util.io.pem.PemObject
 import org.bouncycastle.util.io.pem.PemWriter
 import java.io.StringWriter
 import java.security.PublicKey
-import kotlin.reflect.KClass
 
 internal fun interface CredentialConfigurationFilter {
     operator fun invoke(conf: CredentialConfiguration): Boolean
@@ -132,4 +132,28 @@ internal val PublicKey.pem: String
 internal fun ByteArray.derToJose(algorithm: JWSAlgorithm = JWSAlgorithm.ES256): ByteArray {
     val len = ECDSA.getSignatureByteArrayLength(algorithm)
     return ECDSA.transcodeSignatureToConcat(this, len)
+}
+
+
+internal fun Display?.toMetaData(
+    uniqueDocumentId: DocumentId
+): DocumentMetaData? {
+    fun Display.Image?.toMetaDataImage(): Image? {
+        if (this == null) return null
+        return Image(
+            url = uri?.toString(),
+            contentDescription = alternativeText
+        )
+    }
+
+    if (this == null) return null
+
+    return DocumentMetaData(
+        uniqueDocumentId = uniqueDocumentId,
+        documentName = name,
+        logo = logo.toMetaDataImage(),
+        backgroundColor = backgroundColor,
+        textColor = textColor,
+        backgroundImage = backgroundImage.toMetaDataImage()
+    )
 }

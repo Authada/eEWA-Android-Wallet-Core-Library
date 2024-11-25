@@ -44,7 +44,7 @@ import org.junit.Test
 const val ANNEX_B_OPENID4VP_HANDOVER = "835820DA25C527E5FB75BC2DD31267C02237C4462BA0C1BF37071F692E7DD93B10AD0B5820F6ED8E3220D3C59A5F17EB45F48AB70AEECF9EE21744B1014982350BD96AC0C572616263646566676831323334353637383930"
 const val ANNEX_B_SESSION_TRANSCRIPT = "83F6F6835820DA25C527E5FB75BC2DD31267C02237C4462BA0C1BF37071F692E7DD93B10AD0B5820F6ED8E3220D3C59A5F17EB45F48AB70AEECF9EE21744B1014982350BD96AC0C572616263646566676831323334353637383930"
 
-const val clientId = "example.com"
+const val CLIENT_ID = "example.com"
 const val responseUri = "https://example.com/12345/response"
 const val nonce = "abcdefgh1234567890"
 const val mdocGeneratedNonce = "1234567890abcdefgh"
@@ -52,7 +52,7 @@ const val mdocGeneratedNonce = "1234567890abcdefgh"
 class Openid4VpUtilsTest {
     @Test
     fun testGenerateOpenId4VpHandover() {
-        val openid4VpHandover = Openid4VpUtils.generateOpenId4VpHandover(clientId,
+        val openid4VpHandover = Openid4VpUtils.generateOpenId4VpHandover(CLIENT_ID,
             responseUri,
             nonce,
             mdocGeneratedNonce).EncodeToBytes()
@@ -62,7 +62,7 @@ class Openid4VpUtilsTest {
     @Test
     fun testGenerateSessionTranscript() {
         val sessionTranscript = Openid4VpUtils.generateSessionTranscript(
-            clientId,
+            CLIENT_ID,
             responseUri,
             nonce,
             mdocGeneratedNonce

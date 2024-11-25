@@ -28,12 +28,12 @@ import eu.europa.ec.eudi.wallet.issue.openid4vci.derToJose
 import io.ktor.util.Hash
 import org.bouncycastle.crypto.digests.SHA256Digest
 
-class SESigner(private val pidLib: PidLib) : JWSSigner {
+class SESigner(private val pidLib: PidLib, private val keyId: ByteArray) : JWSSigner {
     override fun getJCAContext(): JCAContext = JCAContext()
 
     override fun supportedJWSAlgorithms(): Set<JWSAlgorithm> = setOf(JWSAlgorithm.ES256)
 
     override fun sign(p0: JWSHeader?, p1: ByteArray): Base64URL = Base64URL.encode(
-        pidLib.signWithDevKey(p1).derToJose(JWSAlgorithm.ES256)
+        pidLib.signWithKey(keyId, p1).derToJose(JWSAlgorithm.ES256)
     )
 }

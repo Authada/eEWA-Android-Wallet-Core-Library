@@ -120,8 +120,13 @@ dependencies {
 
     implementation libs.upokecenter.cbor
     implementation libs.cose.java
+    implementation libs.did.common
+    implementation libs.multiformat
+    implementation libs.result.monad
+
 
     testImplementation libs.junit
+    testImplementation libs.junit.jupiter.params
     testImplementation libs.json
     testImplementation libs.mockk
     testImplementation libs.mockito.inline

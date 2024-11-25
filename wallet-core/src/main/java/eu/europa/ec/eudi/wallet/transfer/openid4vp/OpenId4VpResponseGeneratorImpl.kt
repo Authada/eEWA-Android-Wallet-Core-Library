@@ -55,7 +55,6 @@ import com.nimbusds.jose.jwk.JWK
 import com.nimbusds.jose.util.Base64URL
 import com.nimbusds.jwt.SignedJWT
 import com.upokecenter.cbor.CBORObject
-import de.authada.eewa.wallet.PersonalData
 import eu.europa.ec.eudi.iso18013.transfer.DisclosedDocument
 import eu.europa.ec.eudi.iso18013.transfer.DisclosedDocuments
 import eu.europa.ec.eudi.iso18013.transfer.DocItem
@@ -87,6 +86,7 @@ import eu.europa.ec.eudi.wallet.document.asNameSpacedData
 import eu.europa.ec.eudi.wallet.document.getSeStoredCredentialMap
 import eu.europa.ec.eudi.wallet.document.toDigestIdMapping
 import eu.europa.ec.eudi.wallet.internal.Openid4VpX509CertificateTrust
+import eu.europa.ec.eudi.wallet.internal.VerifierAttestationTrust
 import eu.europa.ec.eudi.wallet.issue.openid4vci.CredentialFormat
 import eu.europa.ec.eudi.wallet.issue.openid4vci.IssueEvent
 import eu.europa.ec.eudi.wallet.issue.openid4vci.derToJose
@@ -94,8 +94,11 @@ import eu.europa.ec.eudi.wallet.transfer.FormatDocRequest
 import eu.europa.ec.eudi.wallet.transfer.FormatDocumentsResolver
 import eu.europa.ec.eudi.wallet.transfer.FormatRequestDocument
 import eu.europa.ec.eudi.wallet.transfer.toTransferObject
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import java.time.Duration
 import java.time.Instant
 import java.util.Base64
@@ -114,12 +117,13 @@ private const val TAG = "OpenId4VpCBORResponseGe"
 class OpenId4VpResponseGeneratorImpl(
     private val documentsResolver: FormatDocumentsResolver,
     private val storageEngine: StorageEngine,
-    private val secureArea: AndroidKeystoreSecureArea,
+    private val secureArea: SecureArea,
     private val documentManagerImpl: DocumentManager,
     private var readerTrustStore: ReaderTrustStore? = null,
 ) : ResponseGenerator<OpenId4VpRequest>() {
 
-    private val openid4VpX509CertificateTrust = Openid4VpX509CertificateTrust(readerTrustStore)
+    private val openid4VpX509CertificateTrust = Openid4VpX509CertificateTrust(null)
+    private val verifierAttestationTrust = VerifierAttestationTrust(readerTrustStore)
 
     /**
      * Set a trust store so that reader authentication can be performed.
@@ -129,7 +133,7 @@ class OpenId4VpResponseGeneratorImpl(
      * @param readerTrustStore a trust store for reader authentication, e.g. DefaultReaderTrustStore
      */
     override fun setReaderTrustStore(readerTrustStore: ReaderTrustStore) = apply {
-        openid4VpX509CertificateTrust.setReaderTrustStore(readerTrustStore)
+        verifierAttestationTrust.setReaderTrustStore(readerTrustStore)
         this.readerTrustStore = readerTrustStore
     }
 
@@ -141,11 +145,12 @@ class OpenId4VpResponseGeneratorImpl(
      * @param readerTrustStore a trust store for reader authentication, e.g. DefaultReaderTrustStore
      */
     fun readerTrustStore(readerTrustStore: ReaderTrustStore) = apply {
-        openid4VpX509CertificateTrust.setReaderTrustStore(readerTrustStore)
+        verifierAttestationTrust.setReaderTrustStore(readerTrustStore)
         this.readerTrustStore = readerTrustStore
     }
 
     internal fun getOpenid4VpX509CertificateTrust() = openid4VpX509CertificateTrust
+    internal fun getVerifierAttestationTrust() = verifierAttestationTrust
 
     private data class LastRequestDetails(
         val sessionTranscript: SessionTranscriptBytes,
@@ -177,35 +182,59 @@ class OpenId4VpResponseGeneratorImpl(
         )
         return createRequestedDocumentData(
             requestedFields = request.openId4VPAuthorization.presentationDefinition.inputDescriptors
-                .mapNotNull { inputDescriptor ->
+                .flatMap { inputDescriptor ->
                     val format =
                         inputDescriptor.format?.jsonObject()?.keys?.mapNotNull { formatString ->
                             Format.values().find { it.formatString == formatString }
                         }?.first() ?: Format.MSO_MDOC
-                    val fields =
-                        (inputDescriptor.id.value.trim() to format) to inputDescriptor.constraints.fields()
-                            .mapNotNull { fieldConstraint ->
-                                // path shall contain a requested data element as: $['<namespace>']['<data element identifier>']
-                                when (format) {
-                                    Format.SD_JWT_VC -> {
+                    when (format) {
+                        Format.SE_TLV -> throw UnsupportedOperationException("se-tlv format not supported for presentation")
+                        Format.MSO_MDOC -> {
+                            val result = (inputDescriptor.id.value.trim() to format) to inputDescriptor.constraints.fields()
+                                .mapNotNull { fieldConstraint ->
+                                    // path shall contain a requested data element as: $['<namespace>']['<data element identifier>']
+                                    val path = fieldConstraint.paths.first().value
+                                    extractMdocField(path)
+
+                                }.groupBy({ it.first }, { it.second })
+                                .mapValues { (_, values) -> values.toList() }
+                                .toMap()
+                            listOf(result)
+                        }
+
+                        Format.SD_JWT_VC -> {
+                            val vctValuesFilter = inputDescriptor.constraints.fields()
+                                .find {
+                                    it.paths.any {
+                                        it.value.equals(
+                                            "$.vct",
+                                            ignoreCase = true
+                                        )
+                                    }
+                                }?.filter?.jsonObject()
+                            val listOfPossibleDocTypesAccordingToVctValue =
+                                ((vctValuesFilter?.get("enum") as? JsonArray)?.map { it.jsonPrimitive.content }) ?:
+                                (vctValuesFilter?.get("const") as? JsonPrimitive)?.let { listOf(it.content) }
+                            val fallbackDocTypeToSearchFor = inputDescriptor.id.value
+                            val listOfPossibleDocTypes =
+                                listOfPossibleDocTypesAccordingToVctValue ?: listOf(
+                                    fallbackDocTypeToSearchFor
+                                )
+                            listOfPossibleDocTypes.map { docType ->
+                                val realFields = inputDescriptor.constraints.fields()
+                                    .mapNotNull { fieldConstraint ->
+                                        // path shall contain a requested data element as: $['<namespace>']['<data element identifier>']
                                         val path = fieldConstraint.paths.first().value
                                         extractSdJwtField(path)?.let {
-                                            inputDescriptor.id.value to it
+                                            docType to it
                                         }
-                                    }
-
-                                    Format.MSO_MDOC -> {
-                                        val path = fieldConstraint.paths.first().value
-                                        extractMdocField(path)
-                                    }
-
-                                    Format.SE_TLV -> throw UnsupportedOperationException("se-tlv format not supported for presentation")
-                                }
-
-                            }.groupBy({ it.first }, { it.second })
-                            .mapValues { (_, values) -> values.toList() }
-                            .toMap()
-                    fields
+                                    }.groupBy({ it.first }, { it.second })
+                                    .mapValues { (_, values) -> values.toList() }
+                                    .toMap()
+                                Pair(docType, format) to realFields
+                            }
+                        }
+                    }
                 }.toMap(),
             readerAuth = openid4VpX509CertificateTrust.getTrustResult()?.let { (chain, isTrusted) ->
                 ReaderAuth(
@@ -243,7 +272,8 @@ class OpenId4VpResponseGeneratorImpl(
         }
 
     private fun getKeyForAuthenticatedChannelIfRequired(openId4VPAuthorization: ResolvedRequestObject.OpenId4VPAuthorization): JWK? {
-        val format = openId4VPAuthorization.presentationDefinition.inputDescriptors.firstOrNull()?.format?.jsonObject()
+        val format =
+            openId4VPAuthorization.presentationDefinition.inputDescriptors.firstOrNull()?.format?.jsonObject()
         val authenticatedChannelAlgorithms = listOf(
             JWSAlgorithm("DVS-P256-SHA256-HS256").toJSONString(),
             JWSAlgorithm("DVS-P384-SHA256-HS256").toJSONString(),
@@ -256,21 +286,30 @@ class OpenId4VpResponseGeneratorImpl(
                         authenticatedChannelAlgorithms.contains(it.toString())
                     } ?: false
                 }
+
                 format?.get("vc+sd-jwt") != null -> {
                     format["vc+sd-jwt"]?.jsonObject?.get("sd-jwt_alg_values")?.jsonArray?.any {
                         authenticatedChannelAlgorithms.contains(it.toString())
                     } ?: false
                 }
+
                 else -> false
             }
-        }
-        catch (e: Exception) {
-            Log.e(TAG, "Exception during parsing json from verifier to check for authenticated channel requirement:", e)
+        } catch (e: Exception) {
+            Log.e(
+                TAG,
+                "Exception during parsing json from verifier to check for authenticated channel requirement:",
+                e
+            )
             false
         }
-        return if(isAuthenticatedChannelRequired) {
-            val keyFromVerifierForPidIssuing = (openId4VPAuthorization.jarmRequirement as? JarmRequirement.Encrypted)?.encryptionKeySet?.keys?.firstOrNull()
-            Log.d(TAG, "Authenticated Channel is required, this key will be set: " + keyFromVerifierForPidIssuing)
+        return if (isAuthenticatedChannelRequired) {
+            val keyFromVerifierForPidIssuing =
+                (openId4VPAuthorization.jarmRequirement as? JarmRequirement.Encrypted)?.encryptionKeySet?.keys?.firstOrNull()
+            Log.d(
+                TAG,
+                "Authenticated Channel is required, this key will be set: " + keyFromVerifierForPidIssuing
+            )
             keyFromVerifierForPidIssuing
         } else {
             Log.d(TAG, "No Authenticated Channel requested by Verifier")
@@ -288,7 +327,9 @@ class OpenId4VpResponseGeneratorImpl(
         disclosedDocuments: DisclosedDocuments
     ): ResponseResult {
         try {
-            val requestDetails = requireNotNull(lastRequestDetails, {"lastRequestDetails is null, parseRequest() not yet called?"})
+            val requestDetails = requireNotNull(
+                lastRequestDetails,
+                { "lastRequestDetails is null, parseRequest() not yet called?" })
             val formatMap = disclosedDocuments.documents.groupBy {
                 documentManagerImpl.getDocumentById(it.documentId)!!.format
             }.toMap()
@@ -344,7 +385,7 @@ class OpenId4VpResponseGeneratorImpl(
                             val addResult = if (responseDocument.isProxy) {
                                 val adhocDocument = issueAProxyDocument(
                                     unprocessedResponseDocument = responseDocument,
-                                    format =CredentialFormat.MSO_MDOC,
+                                    format = CredentialFormat.MSO_MDOC,
                                     keyForIssuingAuthChannel = requestDetails.authKeyForAuthChannel
                                 )
                                 addDocumentToResponse(
@@ -387,6 +428,7 @@ class OpenId4VpResponseGeneratorImpl(
             lastRequestDetails = null
             return ResponseResult.Success(OpenId4VpResponse(resultList))
         } catch (e: Exception) {
+            Log.e(TAG, "Exception in createResponse()", e)
             return ResponseResult.Failure(e)
         }
     }
@@ -530,13 +572,8 @@ class OpenId4VpResponseGeneratorImpl(
                 credentialHandle,
                 nonce.toByteArray(Charsets.UTF_8),
                 aud,
-                dataElements.flatMap { dataElement ->
-                    PersonalData.values().filter {
-                        it.attributeName.contentEquals(
-                            dataElement.dataElementName, true
-                        )
-                    }
-                }).pidString
+                dataElements.map(CredentialRequest.DataElement::getDataElementName)
+            ).pidString
         } ?: IllegalStateException("Failed to fetch secure element document")
         return AddDocumentToResponse.Success(data, disclosedDocument.docType, Format.SD_JWT_VC)
     }
@@ -618,9 +655,16 @@ class OpenId4VpResponseGeneratorImpl(
         )
 
         val pointer: Set<JsonPointer> = request.requestedDataElements.map {
-            JsonPointer.parse("/${it.dataElementName}")!!
+            with(it.dataElementName.replace('.', '/')) {
+                JsonPointer.parse("/$this")!!
+            }
         }.toSet()
-        val presentation: SdJwt.Presentation<SignedJWT> = signedSdJwt.present(pointer)!!
+        val presentation: SdJwt.Presentation<SignedJWT>? =
+            signedSdJwt.present {
+                generateSequence(it) { present -> present.parent() }.any { jsonPointer ->
+                    jsonPointer in pointer
+                }
+            }
 
         val keyUnlockData =
             AndroidKeystoreSecureArea.KeyUnlockData(adhocDocument.disclosedDocument.documentId)
@@ -636,7 +680,7 @@ class OpenId4VpResponseGeneratorImpl(
                 )
             }
 
-            val sdJwtWithKbJwt = presentation.serializeWithKeyBinding(
+            val sdJwtWithKbJwt = presentation!!.serializeWithKeyBinding(
                 hashAlgorithm, KeyBindingSignerImpl(
                     JWK.parse(signedSdJwt.jwt.jwtClaimsSet.getJSONObjectClaim("cnf")["jwk"] as Map<String, Any>),
                     JWSAlgorithm.ES256,
@@ -680,7 +724,7 @@ class OpenId4VpResponseGeneratorImpl(
         requestedFields: Map<Pair<String, Format>, Map<String, List<String>>>,
         readerAuth: ReaderAuth?,
     ): RequestedDocumentData {
-        //requestedFields contains key "eu.europa.ec.eudiw.pid.1", and values like "family_name"
+        //requestedFields contains key "eu.europa.ec.eudi.pid.1", and values like "family_name"
         val requestedDocuments = mutableListOf<FormatRequestDocument>()
         requestedFields.forEach { document ->
             // create doc item
@@ -696,30 +740,12 @@ class OpenId4VpResponseGeneratorImpl(
                 documentsResolver.resolveDocuments(
                     FormatDocRequest(
                         format,
-                        docType, //"eu.europa.ec.eudiw.pid.1"
-                        docItems, //DocItem("eu.europa.ec.eudiw.pid.1", "family_name")
+                        docType, //"eu.europa.ec.eudi.pid.1"
+                        docItems, //DocItem("eu.europa.ec.eudi.pid.1", "family_name")
                         readerAuth //null
                     )
                 )
             )
-
-            if (requestedDocuments.isEmpty()) { //TODO: also check if the session is without secure element
-                //Add some random document to trick wallet into thinking there is something FIXME one day
-                requestedDocuments.add(
-                    FormatRequestDocument(
-                        documentId = "0932574d-4b05-4553-9e58-5a786aed723a", //some id
-                        docType = docType, //"eu.europa.ec.eudiw.pid.1"
-                        docName = "EU PID",
-                        userAuthentication = false,
-                        docRequest = FormatDocRequest(
-                            format,
-                            docType,
-                            docItems,
-                            readerAuth
-                        )
-                    )
-                )
-            }
         }
 
         return RequestedDocumentData(requestedDocuments.map { it.toTransferObject() })
@@ -730,6 +756,7 @@ class OpenId4VpResponseGeneratorImpl(
         var formatDocumentsResolver: FormatDocumentsResolver? = null
         var documentManager: DocumentManager? = null
         var readerTrustStore: ReaderTrustStore? = null
+        var secureArea: ((StorageEngine) -> SecureArea)? = null
 
         /**
          * Reader trust store that will be used to validate the certificate chain of the mdoc verifier
@@ -744,7 +771,7 @@ class OpenId4VpResponseGeneratorImpl(
                 OpenId4VpResponseGeneratorImpl(
                     documentsResolver,
                     storageEngine,
-                    androidSecureArea,
+                    secureArea = secureArea?.invoke(storageEngine) ?: androidSecureArea,
                     documentManager!!,
                 ).apply {
                     readerTrustStore?.let { setReaderTrustStore(it) }

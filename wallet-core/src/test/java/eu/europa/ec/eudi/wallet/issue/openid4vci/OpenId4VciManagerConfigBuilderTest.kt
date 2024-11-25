@@ -31,16 +31,20 @@
 
 package eu.europa.ec.eudi.wallet.issue.openid4vci
 
+import eu.europa.ec.eudi.wallet.document.Constants.EU_PID_DOCTYPE
+import eu.europa.ec.eudi.wallet.document.Constants.MDL_DOCTYPE
+import eu.europa.ec.eudi.wallet.documentsTest.util.DocType
+import eu.europa.ec.eudi.wallet.internal.CLIENT_ID
 import org.junit.Assert.*
 import org.junit.Test
 
 class OpenId4VciManagerConfigBuilderTest {
 
     @Test
-    fun `ConfigBuilder builds Config with valid issuerUrl, clientId and authFlowRedirectionURI`() {
+    fun `ConfigBuilder builds Config with valid issuerMap, and authFlowRedirectionURI`() {
         val builder = OpenId4VciManager.Config.Builder()
-            .withIssuerUrl("https://issuer.example.com")
-            .withClientId("testClientId")
+            .issuerMap(VALID_ISSUER_URLS_PROVIDER)
+            .clientId(CLIENT_ID)
             .withAuthFlowRedirectionURI("app://redirect")
 
         val config = builder.build()
@@ -49,23 +53,11 @@ class OpenId4VciManagerConfigBuilderTest {
     }
 
     @Test
-    fun `ConfigBuilder throws exception when issuerUrl is not set`() {
+    fun `ConfigBuilder throws exception when issuerMap is not set`() {
         val builder = OpenId4VciManager.Config.Builder()
-            .clientId("testClientId")
             .authFlowRedirectionURI("app://redirect")
 
-        assertThrows(IllegalStateException::class.java) {
-            builder.build()
-        }
-    }
-
-    @Test
-    fun `ConfigBuilder throws exception when clientId is not set`() {
-        val builder = OpenId4VciManager.Config.Builder()
-            .issuerUrl("https://issuer.example.com")
-            .authFlowRedirectionURI("app://redirect")
-
-        assertThrows(IllegalStateException::class.java) {
+        assertThrows(IllegalArgumentException::class.java) {
             builder.build()
         }
     }
@@ -73,10 +65,9 @@ class OpenId4VciManagerConfigBuilderTest {
     @Test
     fun `ConfigBuilder throws exception when authFlowRedirectionURI is not set`() {
         val builder = OpenId4VciManager.Config.Builder()
-            .issuerUrl("https://issuer.example.com")
-            .clientId("testClientId")
+            .issuerMap(VALID_ISSUER_URLS_PROVIDER)
 
-        assertThrows(IllegalStateException::class.java) {
+        assertThrows(IllegalArgumentException::class.java) {
             builder.build()
         }
     }
@@ -84,14 +75,21 @@ class OpenId4VciManagerConfigBuilderTest {
     @Test
     fun `ConfigBuilder sets issuerUrl correctly`() {
         val builder = OpenId4VciManager.Config.Builder()
-            .issuerUrl("https://issuer.example.com")
-            .clientId("testClientId")
+            .issuerMap(VALID_ISSUER_URLS_PROVIDER)
+            .clientId(CLIENT_ID)
             .authFlowRedirectionURI("app://redirect")
 
         val config = builder.build()
 
-        assertEquals("https://issuer.example.com", config.issuerUrl)
-        assertEquals("testClientId", config.clientId)
+        assertEquals(
+            "https://issuer.example.com/mdl",
+            config.getIssuerUrlByDocType(DocType.MDL.docTypeName)
+        )
+        assertEquals(CLIENT_ID, config.clientId)
+        assertEquals(
+            "https://issuer.example.com/pid",
+            config.getIssuerUrlByDocType(DocType.PID.docTypeName)
+        )
         assertEquals("app://redirect", config.authFlowRedirectionURI)
         assertFalse(config.useStrongBoxIfSupported)
         assertFalse(config.useDPoPIfSupported)
@@ -100,8 +98,8 @@ class OpenId4VciManagerConfigBuilderTest {
     @Test
     fun `ConfigBuilder sets useStrongBoxIfSupported correctly`() {
         val builder = OpenId4VciManager.Config.Builder()
-            .issuerUrl("https://issuer.example.com")
-            .clientId("testClientId")
+            .issuerMap(VALID_ISSUER_URLS_PROVIDER)
+            .clientId(CLIENT_ID)
             .authFlowRedirectionURI("app://redirect")
             .useStrongBoxIfSupported(true)
 
@@ -113,13 +111,24 @@ class OpenId4VciManagerConfigBuilderTest {
     @Test
     fun `ConfigBuilder sets useDPoPIfSupported correctly`() {
         val builder = OpenId4VciManager.Config.Builder()
-            .issuerUrl("https://issuer.example.com")
-            .clientId("testClientId")
+            .issuerMap(VALID_ISSUER_URLS_PROVIDER)
+            .clientId(CLIENT_ID)
             .authFlowRedirectionURI("app://redirect")
             .useDPoP(true)
 
         val config = builder.build()
 
         assertTrue(config.useDPoPIfSupported)
+    }
+
+    companion object {
+        private val VALID_ISSUER_URLS_PROVIDER: IssuerMap = mapOf(
+            EU_PID_DOCTYPE to OpenId4VciManager.Config.Issuer(
+                "https://issuer.example.com/pid",
+            ),
+            MDL_DOCTYPE to OpenId4VciManager.Config.Issuer(
+                "https://issuer.example.com/mdl"
+            )
+        )
     }
 }
